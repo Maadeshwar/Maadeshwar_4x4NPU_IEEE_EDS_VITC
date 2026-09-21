@@ -27,6 +27,10 @@ def signed16(value):
     return value - 0x10000 if value & 0x8000 else value
 
 
+def quantized_int4(value):
+    return max(-8, min(7, value))
+
+
 class Driver:
     def __init__(self, dut):
         self.dut = dut
@@ -36,7 +40,7 @@ class Driver:
         self.dut.ui_in.value = 0
         self.dut.uio_in.value = 0
         self.dut.rst_n.value = 0
-        await Timer(20, units="ns")
+        await Timer(20, unit="ns")
         self.dut.rst_n.value = 1
         await RisingEdge(self.dut.clk)
         assert int(self.dut.uio_oe.value) == 0
@@ -51,7 +55,7 @@ class Driver:
         await RisingEdge(self.dut.clk)
         self.dut.uio_in.value = 0
         await RisingEdge(self.dut.clk)
-        await Timer(1, units="ns")
+        await Timer(1, unit="ns")
         return int(self.dut.uo_out.value)
 
 
@@ -77,7 +81,7 @@ async def read_acc(drv, lane, nibble_index):
 
 @cocotb.test()
 async def test_dual_lane_dot_product(dut):
-    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 20, unit="ns").start())
     drv = Driver(dut)
     await drv.reset()
     await drv.command(CMD_CLEAR)
@@ -93,25 +97,27 @@ async def test_dual_lane_dot_product(dut):
         expected1 += a * w1
 
     out0 = await finish(drv, CMD_LINEAR, 0)
-    assert out0 & 0x0F == (expected0 & 0xF)
-    assert (out0 >> 3) & 1 == 1  # DONE
+    assert signed4(out0 & 0x0F) == quantized_int4(expected0)
+    assert (out0 >> 4) & 1 == 1  # DONE
     assert (out0 >> 7) & 1 == 1  # RESULT_VALID
 
     out1 = await finish(drv, CMD_LINEAR, 1)
-    assert out1 & 0x0F == (expected1 & 0xF)
+    assert signed4(out1 & 0x0F) == quantized_int4(expected1)
     assert (out1 >> 7) & 1 == 1
 
-    reconstructed0 = sum((await read_acc(drv, 0, i)) << (4 * i)
-                         for i in range(4))
-    reconstructed1 = sum((await read_acc(drv, 1, i)) << (4 * i)
-                         for i in range(4))
+    reconstructed0 = 0
+    for i in range(4):
+        reconstructed0 |= (await read_acc(drv, 0, i)) << (4 * i)
+    reconstructed1 = 0
+    for i in range(4):
+        reconstructed1 |= (await read_acc(drv, 1, i)) << (4 * i)
     assert signed16(reconstructed0) == expected0
     assert signed16(reconstructed1) == expected1
 
 
 @cocotb.test()
 async def test_signed_products_and_relu(dut):
-    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 20, unit="ns").start())
     drv = Driver(dut)
     await drv.reset()
     for a in range(-8, 8):
@@ -119,7 +125,7 @@ async def test_signed_products_and_relu(dut):
             await drv.command(CMD_CLEAR)
             await mac(drv, a, b, 0)
             out = await finish(drv, CMD_LINEAR, 0)
-            assert signed4(out & 0xF) == a * b
+            assert signed4(out & 0xF) == quantized_int4(a * b)
 
     await drv.command(CMD_CLEAR)
     await mac(drv, -3, 2, 0)
@@ -129,7 +135,7 @@ async def test_signed_products_and_relu(dut):
 
 @cocotb.test()
 async def test_saturation_and_reset(dut):
-    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, 20, unit="ns").start())
     drv = Driver(dut)
     await drv.reset()
     await drv.command(CMD_CLEAR)
@@ -141,7 +147,7 @@ async def test_saturation_and_reset(dut):
     assert (out >> 4) & 1 == 1  # overflow
 
     dut.rst_n.value = 0
-    await Timer(2, units="ns")
+    await Timer(2, unit="ns")
     dut.rst_n.value = 1
     await RisingEdge(dut.clk)
     assert await read_acc(drv, 0, 0) == 0
