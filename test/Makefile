@@ -14,9 +14,15 @@ else
 
 # Gate-level simulation. The GDS action supplies gate_level_netlist.v.
 SIM_BUILD = sim_build/gl
-COMPILE_ARGS += -DGL_TEST -DFUNCTIONAL -DSIM
+COMPILE_ARGS += -DGL_TEST -DFUNCTIONAL -DSIM -DUNIT_DELAY=\#1 -DUSE_POWER_PINS -gno-specify
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
-VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
+# Patch out every `ifnone` line — iverilog v13 cannot parse them and exits non-zero.
+# sed strips only the timing-annotation lines; functional cell behaviour is unchanged.
+$(shell mkdir -p sim_build/gl && \
+        sed '/ifnone/d' \
+            $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v \
+            > sim_build/gl/sg13g2_stdcell_patched.v)
+VERILOG_SOURCES += $(PWD)/sim_build/gl/sg13g2_stdcell_patched.v
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
 
 endif
