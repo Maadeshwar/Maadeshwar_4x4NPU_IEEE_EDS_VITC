@@ -1,76 +1,59 @@
-# StreamDot-4 specification
+# 4x4NPU specification
 
-StreamDot-4 is a time-multiplexed signed dot-product accelerator for a single
-IHP SG13G2 Tiny Tapeout 1x1 tile. It deliberately uses one reusable 4-bit
-multiplier instead of a parallel processing-element array.
+4x4NPU is a host-controlled two-lane signed INT4 neural datapath targeting a
+single IHP SG13G2 Tiny Tapeout tile. It uses a three-process controller FSM:
 
-## Arithmetic
+1. `IDLE` captures one command and its operands.
+2. `EXEC` performs the command and updates the datapath.
+3. `DONE` returns the controller to `IDLE` and provides a clean command-cycle
+   boundary.
 
-Operands are signed two's-complement values in the range -8 through +7:
+## Datapath
 
-```text
-ui_in[3:0] = A
-ui_in[7:4] = B
-```
+`ui_in[3:0]` is a signed INT4 activation. `ui_in[7:4]` is lane-0's signed
+INT4 weight. `uio_in[7:4]` is lane-1's signed INT4 weight during `MAC`.
+Each accepted MAC command updates both independent signed 16-bit accumulators.
+Products are exact signed INT4 products and accumulators saturate at -32768 and
++32767. Overflow is sticky until `CLEAR` or reset.
 
-Each accepted operation computes `A*B` and adds it to a signed 12-bit
-accumulator. The accumulator saturates at -2048 and +2047. Saturation sets a
-sticky overflow flag until reset or clear.
+## Commands
 
-## Modes
+`uio_in[2:0]` selects the command and `uio_in[3]` qualifies it:
 
-In dot-product mode (`uio_in[4] = 0`), `CLEAR` starts a new vector. The next
-four valid products are accepted as terms 0 through 3. The fourth term sets
-`DONE`; further valid pulses are ignored until another clear.
+| Command | Name | Function |
+|---:|---|---|
+| 000 | NOP | No operation |
+| 001 | CLEAR | Clear biases, accumulators, result, and overflow |
+| 010 | BIAS_LOW | Load the low bias nibble for the lane selected by `ui_in[0]` |
+| 011 | BIAS_HIGH | Combine the high nibble with the stored low nibble as signed INT8 bias |
+| 100 | MAC | Accumulate both lane products |
+| 101 | FINISH_RELU | ReLU, arithmetic shift, and signed INT4 saturation |
+| 110 | FINISH_LINEAR | Arithmetic shift and signed INT4 saturation |
+| 111 | READ_ACC | Read one accumulator nibble selected by `uio_in[5:4]` |
 
-The continuous-mode selection is latched when `CLEAR` is asserted. If
-`uio_in[4] = 1` during clear, every later valid product is accepted until the
-next clear. This mode supports longer FIR filters, sensor fusion sequences,
-and software-controlled MAC loops.
+The parameter field is `uio_in[7:4]`. For `FINISH_*`, it is the arithmetic
+right-shift amount. For `READ_ACC`, its low two bits select accumulator nibble
+0 through 3. For bias commands, it carries the bias nibble.
 
-The control FSM has three explicit states: `IDLE`, `RUN`, and `DONE`. `DONE`
-is reached after the fourth dot-product term and blocks further operations
-until `CLEAR`.
+## Outputs
 
-Control inputs:
+`uo_out[3:0]` is the quantized result or accumulator nibble. `uo_out[4]` is a
+one-cycle `DONE` indication for finish/read commands. `uo_out[5]` is sticky
+overflow, `uo_out[6]` is the selected accumulator sign, and `uo_out[7]` is
+`RESULT_VALID`.
 
-- `uio_in[0]`: `VALID`; sample and accumulate on the rising clock edge
-- `uio_in[1]`: `CLEAR`; clear accumulator, term count, done, and overflow
-- `uio_in[3:2]`: output page select
-- `uio_in[4]`: continuous mode
-- `uio_in[7:5]`: activation/output mode
+All bidirectional pads are input-only (`uio_oe = 0`) to avoid contention with
+the host board.
 
-`uio_oe` is always zero. All bidirectional pads are inputs, preventing output
-contention with the host board.
+## Applications
 
-## Output pages
+The block can execute quantized neural layers, two-neuron perceptrons, small
+convolution/dot-product kernels, sensor-feature classifiers, and compact DSP
+filters. Training and quantization remain off-chip; the fabricated chip
+performs the deterministic INT4 inference arithmetic.
 
-The selected page is presented on `uo_out`:
+## Verification boundary
 
-- page 0: activation-mode output derived from the accumulator
-- page 1: accumulator bits `[11:8]` in `uo_out[3:0]`
-- page 2: sticky overflow in `uo_out[0]`
-- page 3: accepted pulse in `uo_out[0]`, ready in `uo_out[1]`, `DONE` in
-  `uo_out[2]`, and the current term count in `uo_out[4:3]`
-
-`uio_out` is tied low because the bidirectional pins are input-only.
-
-Activation modes for page 0 are:
-
-- `000`: raw signed accumulator low byte
-- `001`: ReLU (`max(accumulator, 0)`)
-- `010`: absolute value
-- `011`: positive threshold classifier (`1` when accumulator is positive)
-- `100`: signed 8-bit clamp to `[-128, 127]`
-- `101`: sign mask (`0xff` for negative, otherwise `0x00`)
-
-This makes the block directly usable as a small neural-network activation
-engine, a four-tap FIR/filter primitive, or a sensor-feature classifier.
-
-## Verification and limits
-
-The cocotb model checks all signed operand combinations, four-term dot
-products, ignored post-DONE operations, continuous mode, reset, enable, clear
-priority, and positive/negative saturation. Passing simulation is necessary but
-not sufficient for silicon. The Tiny Tapeout IHP130 flow must also pass
-synthesis, placement, routing, STA, DRC, LVS, and project-level checks.
+The project includes Cocotb RTL tests and Tiny Tapeout IHP130 GDS/precheck/
+gate-level workflows. Final silicon claims require all CI jobs, STA, DRC, LVS,
+and post-fabrication measurements to pass.

@@ -1,11 +1,15 @@
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
-VERILOG_SOURCES += $(PWD)/../src/project.v
+SRC_DIR = $(PWD)/../src
+VERILOG_SOURCES += $(SRC_DIR)/tt_um_4x4npu.v
+VERILOG_SOURCES += $(SRC_DIR)/npu4_core.v
+VERILOG_SOURCES += $(SRC_DIR)/int4_multiplier.sv
+VERILOG_SOURCES += $(SRC_DIR)/int4_quantizer.sv
+VERILOG_SOURCES += $(PWD)/tb_tt_um_4x4npu.v
 
-TOPLEVEL = tt_um_streamdot4
+COMPILE_ARGS += -g2012 -I$(SRC_DIR)
+TOPLEVEL = tb_tt_um_4x4npu
 MODULE = test
-
-COMPILE_ARGS += -g2012
 
 include $(shell cocotb-config --makefiles)/Makefile.sim

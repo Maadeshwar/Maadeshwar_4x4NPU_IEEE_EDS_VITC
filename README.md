@@ -1,40 +1,26 @@
-# StreamDot-4 — IHP130 Tiny Tapeout Dot-Product Accelerator
+# 4x4NPU — Dual-Lane INT4 Neural Accelerator
 
-StreamDot-4 is a compact, standalone digital accelerator for the IHP SG13G2
-130 nm Tiny Tapeout shuttle. It reuses one signed 4-bit multiplier and a
-12-bit saturating accumulator, then provides selectable activation functions
-for edge-AI and DSP workloads.
+4x4NPU is an original Tiny Tapeout IHP SG13G2 design inspired by the
+architecture of small command-driven INT4 neural accelerators. It is not a
+copy of another repository. The datapath contains two independent signed
+INT4 MAC lanes, signed 16-bit saturation, bias loading, ReLU/linear INT4
+quantization, and accumulator readback.
 
-In its default mode, four accepted products form one complete dot product:
-
-```text
-Y = A0*B0 + A1*B1 + A2*B2 + A3*B3
-```
-
-After the fourth term, `DONE` asserts and additional terms are ignored until
-`CLEAR`. A continuous mode is also provided for longer FIR/DSP-style MAC
-sequences. The remaining bidirectional input pins select raw, ReLU, absolute,
-threshold, and signed-clamp output modes.
-
-## Project files
-
-- `src/project.v` — synthesizable `tt_um_streamdot4` top module
-- `test/test.py` — cocotb verification
-- `test/Makefile` — local simulator entry point
-- `info.yaml` — Tiny Tapeout metadata and pinout
-- `docs/info.md` — detailed protocol and verification documentation
+The host streams one activation and two weights per `MAC` command. Both lanes
+update in parallel. This enables compact neural-network inference using
+quantized weights, while the host retains control of model scheduling.
 
 ## Verification
 
-The cocotb testbench exhaustively tests all 256 signed 4-bit products and also
-checks four-term dot products, completion locking, continuous accumulation,
-reset, enable gating, clear priority, and both saturation directions.
-
-Run locally from `test/` with:
+The Cocotb testbench checks reset and pin direction, dual-lane signed dot
+products, all 256 signed INT4 products, ReLU behavior, saturation, and full
+16-bit accumulator nibble readback. Run it from `test/` with:
 
 ```text
+python -m pip install -r requirements.txt
 make
 ```
 
-The IHP130 Tiny Tapeout hardening flow must pass before submission. Cocotb
-cannot prove final silicon timing, area, power, DRC, LVS, or pad behavior.
+The Tiny Tapeout IHP130 GDS, precheck, and gate-level workflows are included in
+the repository. Passing RTL simulation is necessary but does not by itself
+prove silicon timing or area.

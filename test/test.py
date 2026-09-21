@@ -1,194 +1,147 @@
-import random
-
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
 
+CMD_NOP = 0
+CMD_CLEAR = 1
+CMD_BIAS_LOW = 2
+CMD_BIAS_HIGH = 3
+CMD_MAC = 4
+CMD_RELU = 5
+CMD_LINEAR = 6
+CMD_READ_ACC = 7
 
-def enc4(value: int) -> int:
+
+def nibble(value):
     assert -8 <= value <= 7
     return value & 0xF
 
 
-def signed12(value: int) -> int:
-    value &= 0xFFF
-    return value - 0x1000 if value & 0x800 else value
+def signed4(value):
+    value &= 0xF
+    return value - 16 if value & 8 else value
 
 
-def clamp12(value: int) -> int:
-    return max(-2048, min(2047, value))
+def signed16(value):
+    value &= 0xFFFF
+    return value - 0x10000 if value & 0x8000 else value
 
 
-async def result(dut, mode: int = 0) -> int:
-    dut.uio_in.value = (mode & 0x7) << 5
-    await Timer(1, units="ns")
-    low = int(dut.uo_out.value)
-    dut.uio_in.value = 0b0100 | ((mode & 0x7) << 5)
-    await Timer(1, units="ns")
-    high = int(dut.uo_out.value) & 0x0F
-    dut.uio_in.value = 0
-    return signed12((high << 8) | low)
+class Driver:
+    def __init__(self, dut):
+        self.dut = dut
+
+    async def reset(self):
+        self.dut.ena.value = 1
+        self.dut.ui_in.value = 0
+        self.dut.uio_in.value = 0
+        self.dut.rst_n.value = 0
+        await Timer(20, units="ns")
+        self.dut.rst_n.value = 1
+        await RisingEdge(self.dut.clk)
+        assert int(self.dut.uio_oe.value) == 0
+
+    async def command(self, opcode, data=0, parameter=0):
+        # The three-state controller needs one edge to capture and one to execute.
+        await RisingEdge(self.dut.clk)
+        self.dut.ui_in.value = data & 0xFF
+        self.dut.uio_in.value = ((opcode & 7) |
+                                 (1 << 3) |
+                                 ((parameter & 0xF) << 4))
+        await RisingEdge(self.dut.clk)
+        self.dut.uio_in.value = 0
+        await RisingEdge(self.dut.clk)
+        await Timer(1, units="ns")
+        return int(self.dut.uo_out.value)
 
 
-async def activation_value(dut, mode: int) -> int:
-    dut.uio_in.value = (mode & 0x7) << 5
-    await Timer(1, units="ns")
-    value = int(dut.uo_out.value)
-    dut.uio_in.value = 0
-    if mode == 4 and value & 0x80:
-        return value - 0x100
-    return value
+async def load_bias(drv, lane, value):
+    value &= 0xFF
+    await drv.command(CMD_BIAS_LOW, lane, value & 0xF)
+    await drv.command(CMD_BIAS_HIGH, lane, (value >> 4) & 0xF)
 
 
-async def status_overflow(dut) -> int:
-    dut.uio_in.value = 0b1000
-    await Timer(1, units="ns")
-    value = int(dut.uo_out.value) & 1
-    dut.uio_in.value = 0
-    return value
+async def mac(drv, activation, weight0, weight1):
+    data = (nibble(weight0) << 4) | nibble(activation)
+    await drv.command(CMD_MAC, data, nibble(weight1))
 
 
-async def status(dut) -> int:
-    dut.uio_in.value = 0b1100
-    await Timer(1, units="ns")
-    value = int(dut.uo_out.value)
-    dut.uio_in.value = 0
-    return value
+async def finish(drv, opcode, lane, shift=0):
+    return await drv.command(opcode, lane, shift)
 
 
-async def status_accepted(dut) -> int:
-    return (await status(dut)) & 1
-
-
-async def status_done(dut) -> int:
-    return ((await status(dut)) >> 2) & 1
-
-
-async def drive(dut, a: int, b: int, valid: int = 1, clear: int = 0,
-               continuous: int = 0, mode: int = 0):
-    dut.ui_in.value = (enc4(b) << 4) | enc4(a)
-    dut.uio_in.value = ((valid & 1) | ((clear & 1) << 1) |
-                        ((continuous & 1) << 4) | ((mode & 0x7) << 5))
-    await RisingEdge(dut.clk)
-    await Timer(1, units="ns")
-    dut.uio_in.value = 0
-
-
-async def reset(dut):
-    dut.ena.value = 1
-    dut.ui_in.value = 0
-    dut.uio_in.value = 0
-    dut.rst_n.value = 0
-    await Timer(2, units="ns")
-    assert await result(dut) == 0
-    assert await status_overflow(dut) == 0
-    dut.rst_n.value = 1
-    await RisingEdge(dut.clk)
-    await Timer(1, units="ns")
+async def read_acc(drv, lane, nibble_index):
+    raw = await drv.command(CMD_READ_ACC, lane, nibble_index)
+    return raw & 0xF
 
 
 @cocotb.test()
-async def test_exhaustive_signed_products(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    await reset(dut)
+async def test_dual_lane_dot_product(dut):
+    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    drv = Driver(dut)
+    await drv.reset()
+    await drv.command(CMD_CLEAR)
+    await load_bias(drv, 0, 0)
+    await load_bias(drv, 1, 0)
 
+    expected0 = 0
+    expected1 = 0
+    vectors = [(2, 3, -1), (1, -2, 4), (-3, -2, 2), (7, 1, -3)]
+    for a, w0, w1 in vectors:
+        await mac(drv, a, w0, w1)
+        expected0 += a * w0
+        expected1 += a * w1
+
+    out0 = await finish(drv, CMD_LINEAR, 0)
+    assert out0 & 0x0F == (expected0 & 0xF)
+    assert (out0 >> 3) & 1 == 1  # DONE
+    assert (out0 >> 7) & 1 == 1  # RESULT_VALID
+
+    out1 = await finish(drv, CMD_LINEAR, 1)
+    assert out1 & 0x0F == (expected1 & 0xF)
+    assert (out1 >> 7) & 1 == 1
+
+    reconstructed0 = sum((await read_acc(drv, 0, i)) << (4 * i)
+                         for i in range(4))
+    reconstructed1 = sum((await read_acc(drv, 1, i)) << (4 * i)
+                         for i in range(4))
+    assert signed16(reconstructed0) == expected0
+    assert signed16(reconstructed1) == expected1
+
+
+@cocotb.test()
+async def test_signed_products_and_relu(dut):
+    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    drv = Driver(dut)
+    await drv.reset()
     for a in range(-8, 8):
         for b in range(-8, 8):
-            await drive(dut, 0, 0, clear=1)
-            await drive(dut, a, b)
-            assert await result(dut) == a * b
-            assert await status_accepted(dut) == 1
-            assert await status_overflow(dut) == 0
-            assert await status_done(dut) == 0
+            await drv.command(CMD_CLEAR)
+            await mac(drv, a, b, 0)
+            out = await finish(drv, CMD_LINEAR, 0)
+            assert signed4(out & 0xF) == a * b
+
+    await drv.command(CMD_CLEAR)
+    await mac(drv, -3, 2, 0)
+    out = await finish(drv, CMD_RELU, 0)
+    assert out & 0xF == 0
 
 
 @cocotb.test()
-async def test_random_accumulation_and_sticky_overflow(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    await reset(dut)
-    rng = random.Random(0x4D4143)
-    for _ in range(500):
-        await drive(dut, 0, 0, clear=1)
-        expected = 0
-        for term in range(4):
-            a = rng.randrange(-8, 8)
-            b = rng.randrange(-8, 8)
-            expected = clamp12(expected + a * b)
-            await drive(dut, a, b)
-            assert await status_accepted(dut) == 1
-        assert await result(dut) == expected
-        assert await status_done(dut) == 1
-        assert await status_overflow(dut) == 0
-        await drive(dut, 7, 7)
-        assert await status_accepted(dut) == 0
-        assert await result(dut) == expected
-
-
-@cocotb.test()
-async def test_control_priority_enable_and_reset(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    await reset(dut)
-
-    await drive(dut, 7, 7)
-    assert await result(dut) == 49
-
-    # CLEAR wins when VALID and CLEAR are asserted together.
-    await drive(dut, -8, -8, valid=1, clear=1)
-    assert await result(dut) == 0
-    assert await status_accepted(dut) == 0
-    assert await status_done(dut) == 0
-
-    # Disabled operation must not change state or report acceptance.
-    dut.ena.value = 0
-    await drive(dut, 7, 7)
-    assert await result(dut) == 0
-    assert await status_accepted(dut) == 0
-    assert int(dut.uio_oe.value) == 0
-    dut.ena.value = 1
-
-    await drive(dut, 1, -1, valid=0)
-    assert await result(dut) == 0
-    assert await status_accepted(dut) == 0
+async def test_saturation_and_reset(dut):
+    cocotb.start_soon(Clock(dut.clk, 20, units="ns").start())
+    drv = Driver(dut)
+    await drv.reset()
+    await drv.command(CMD_CLEAR)
+    await load_bias(drv, 0, 0x7F)
+    for _ in range(700):
+        await mac(drv, 7, 7, 0)
+    out = await finish(drv, CMD_LINEAR, 0)
+    assert out & 0xF == 7
+    assert (out >> 4) & 1 == 1  # overflow
 
     dut.rst_n.value = 0
-    await Timer(1, units="ns")
-    assert await result(dut) == 0
-    assert await status_overflow(dut) == 0
+    await Timer(2, units="ns")
     dut.rst_n.value = 1
-
-
-@cocotb.test()
-async def test_both_saturation_directions(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    await reset(dut)
-
-    await drive(dut, 0, 0, clear=1, continuous=1)
-    for _ in range(50):
-        await drive(dut, 7, 7, continuous=1)
-    assert await result(dut) == 2047
-    assert await status_overflow(dut) == 1
-
-    await drive(dut, 0, 0, clear=1, continuous=1)
-    for _ in range(40):
-        await drive(dut, -8, 7, continuous=1)
-    assert await result(dut) == -2048
-    assert await status_overflow(dut) == 1
-
-
-@cocotb.test()
-async def test_activation_modes(dut):
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
-    await reset(dut)
-
-    await drive(dut, -3, 7, clear=1)
-    await drive(dut, -3, 7)
-    await drive(dut, 2, 4)
-    await drive(dut, 1, 1)
-    await drive(dut, 0, 0)
-    # Accumulator is -21 + 8 + 1 + 0 = -12.
-    assert await result(dut, mode=0) == -12
-    assert await activation_value(dut, mode=1) == 0       # ReLU
-    assert await activation_value(dut, mode=2) == 12      # absolute value
-    assert await activation_value(dut, mode=3) == 0       # positive threshold
-    assert await activation_value(dut, mode=4) == -12     # signed 8-bit clamp
-    assert await activation_value(dut, mode=5) == 0xff    # sign mask
+    await RisingEdge(dut.clk)
+    assert await read_acc(drv, 0, 0) == 0
