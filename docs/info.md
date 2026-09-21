@@ -23,9 +23,14 @@ In dot-product mode (`uio_in[4] = 0`), `CLEAR` starts a new vector. The next
 four valid products are accepted as terms 0 through 3. The fourth term sets
 `DONE`; further valid pulses are ignored until another clear.
 
-In continuous mode (`uio_in[4] = 1`), every valid product is accepted until
-clear. This mode supports longer FIR filters, sensor fusion sequences, and
-software-controlled MAC loops.
+The continuous-mode selection is latched when `CLEAR` is asserted. If
+`uio_in[4] = 1` during clear, every later valid product is accepted until the
+next clear. This mode supports longer FIR filters, sensor fusion sequences,
+and software-controlled MAC loops.
+
+The control FSM has three explicit states: `IDLE`, `RUN`, and `DONE`. `DONE`
+is reached after the fourth dot-product term and blocks further operations
+until `CLEAR`.
 
 Control inputs:
 

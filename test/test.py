@@ -162,13 +162,13 @@ async def test_both_saturation_directions(dut):
     cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
     await reset(dut)
 
-    await drive(dut, 0, 0, clear=1)
+    await drive(dut, 0, 0, clear=1, continuous=1)
     for _ in range(50):
         await drive(dut, 7, 7, continuous=1)
     assert await result(dut) == 2047
     assert await status_overflow(dut) == 1
 
-    await drive(dut, 0, 0, clear=1)
+    await drive(dut, 0, 0, clear=1, continuous=1)
     for _ in range(40):
         await drive(dut, -8, 7, continuous=1)
     assert await result(dut) == -2048

@@ -38,6 +38,12 @@ module tt_um_streamdot4 (
     reg                accepted;
     reg                dot_done;
     reg        [1:0]   term_count;
+    reg        [1:0]   state, next_state;
+    reg                continuous_latched;
+
+    localparam [1:0] ST_IDLE = 2'd0;
+    localparam [1:0] ST_RUN  = 2'd1;
+    localparam [1:0] ST_DONE = 2'd2;
 
     wire signed [3:0] a = $signed(ui_in[3:0]);
     wire signed [3:0] b = $signed(ui_in[7:4]);
@@ -46,12 +52,44 @@ module tt_um_streamdot4 (
     wire signed [7:0] product = a_ext * b_ext;
     wire signed [12:0] extended_sum =
         {{1{acc[11]}}, acc} + {{5{product[7]}}, product};
-    wire continuous_mode = uio_in[4];
+    wire continuous_mode = continuous_latched;
     wire [2:0] activation_mode = uio_in[7:5];
     wire do_clear = ena && uio_in[1];
-    wire do_mac = ena && uio_in[0] && !uio_in[1] &&
-                  (continuous_mode || !dot_done);
+    wire do_mac = ena && uio_in[0] && !uio_in[1] && (state != ST_DONE);
 
+    // FSM process 1: registered state.
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) state <= ST_IDLE;
+        else state <= next_state;
+    end
+
+    // FSM process 2: combinational next-state logic.
+    always @(*) begin
+        next_state = state;
+        case (state)
+            ST_IDLE: begin
+                if (do_clear) begin
+                    next_state = ST_IDLE;
+                end else if (do_mac) begin
+                    next_state = ST_RUN;
+                end
+            end
+            ST_RUN: begin
+                if (do_clear) begin
+                    next_state = ST_IDLE;
+                end else if (do_mac && !continuous_mode &&
+                             (term_count == 2'd3)) begin
+                    next_state = ST_DONE;
+                end
+            end
+            ST_DONE: begin
+                if (do_clear) next_state = ST_IDLE;
+            end
+            default: next_state = ST_IDLE;
+        endcase
+    end
+
+    // FSM process 3: datapath and registered outputs.
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             acc      <= 12'sd0;
@@ -59,6 +97,7 @@ module tt_um_streamdot4 (
             accepted <= 1'b0;
             dot_done <= 1'b0;
             term_count <= 2'd0;
+            continuous_latched <= 1'b0;
         end else begin
             accepted <= 1'b0;
 
@@ -67,6 +106,7 @@ module tt_um_streamdot4 (
                 overflow <= 1'b0;
                 dot_done <= 1'b0;
                 term_count <= 2'd0;
+                continuous_latched <= uio_in[4];
             end else if (do_mac) begin
                 accepted <= 1'b1;
                 if (!continuous_mode) begin
