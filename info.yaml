@@ -1,0 +1,40 @@
+# Tiny Tapeout project information
+project:
+  title: "StreamDot-4: Time-Multiplexed Signed Dot-Product Accelerator"
+  author: ""
+  discord: ""
+  description: "A reusable IHP SG13G2 signed 4-bit MAC supporting four-term dot products and continuous saturated accumulation."
+  language: "Verilog"
+  clock_hz: 10000000
+  tiles: "1x1"
+  top_module: "tt_um_streamdot4"
+  source_files:
+    - "project.v"
+
+pinout:
+  ui[0]: "Operand A bit 0"
+  ui[1]: "Operand A bit 1"
+  ui[2]: "Operand A bit 2"
+  ui[3]: "Operand A bit 3"
+  ui[4]: "Operand B bit 0"
+  ui[5]: "Operand B bit 1"
+  ui[6]: "Operand B bit 2"
+  ui[7]: "Operand B bit 3"
+  uo[0]: "Accumulator bit 0"
+  uo[1]: "Accumulator bit 1"
+  uo[2]: "Accumulator bit 2"
+  uo[3]: "Accumulator bit 3"
+  uo[4]: "Accumulator bit 4"
+  uo[5]: "Accumulator bit 5"
+  uo[6]: "Accumulator bit 6"
+  uo[7]: "Accumulator bit 7"
+  uio[0]: "VALID input"
+  uio[1]: "CLEAR input"
+  uio[2]: "Output page select bit 0"
+  uio[3]: "Output page select bit 1"
+  uio[4]: "Continuous MAC mode"
+  uio[5]: "Activation mode bit 0"
+  uio[6]: "Activation mode bit 1"
+  uio[7]: "Activation mode bit 2"
+
+yaml_version: 6

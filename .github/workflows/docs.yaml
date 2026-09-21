@@ -1,0 +1,22 @@
+name: docs
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Typst
+        run: |
+          wget -qO- https://github.com/typst/typst/releases/download/v0.11.1/typst-x86_64-unknown-linux-musl.tar.xz | tar -xJ
+          sudo mv typst-*/typst /usr/local/bin/
+
+      - name: Build docs
+        uses: TinyTapeout/tt-gds-action/docs@tt08

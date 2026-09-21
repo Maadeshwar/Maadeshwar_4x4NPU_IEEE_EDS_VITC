@@ -1,0 +1,28 @@
+name: cocotb-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install simulators
+        run: sudo apt-get update && sudo apt-get install -y iverilog verilator
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install cocotb
+        run: python -m pip install -r test/requirements.txt
+
+      - name: Run cocotb regression
+        working-directory: test
+        run: make

@@ -1,0 +1,9 @@
+# Ignore local simulation and generated build files.
+test/sim_build/
+test/__pycache__/
+test/*.log
+test/*.xml
+test/*.vcd
+test/**/*.log
+test/**/*.xml
+test/**/*.vcd
