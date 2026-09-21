@@ -1,7 +1,7 @@
 SIM ?= icarus
 TOPLEVEL_LANG ?= verilog
 
-PROJECT_SOURCES += $(PWD)/../src/project.v
+VERILOG_SOURCES += $(PWD)/../src/project.v
 
 TOPLEVEL = tt_um_streamdot4
 MODULE = test

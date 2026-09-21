@@ -1,7 +1,7 @@
 # Tiny Tapeout project information
 project:
   title: "StreamDot-4: Time-Multiplexed Signed Dot-Product Accelerator"
-  author: ""
+  author: "Maadeshwar"
   discord: ""
   description: "A reusable IHP SG13G2 signed 4-bit MAC supporting four-term dot products and continuous saturated accumulation."
   language: "Verilog"
