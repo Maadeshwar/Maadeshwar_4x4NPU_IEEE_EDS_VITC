@@ -1,11 +1,15 @@
+<div align="center">
+
 # 4x4NPU
 
 ![Process](https://img.shields.io/badge/Process-IHP%20SG13G2-2455a4)
 ![Target](https://img.shields.io/badge/Target-Tiny%20Tapeout%201x1-6f42c1)
 ![Clock](https://img.shields.io/badge/Clock-50%20MHz-0b7285)
 ![Datapath](https://img.shields.io/badge/Datapath-Dual%20INT4%20MACs-d9480f)
-![Verification](https://img.shields.io/badge/RTL%20Verification-Cocotb%203%2F3-2f9e44)
+![Verification](https://img.shields.io/badge/RTL%20Verification-Cocotb%204%2F4-2f9e44)
 ![Controller](https://img.shields.io/badge/Controller-Three--State%20FSM-f08c46)
+
+</div>
 
 ## Overview
 
@@ -73,11 +77,12 @@ All 24 Tiny Tapeout pins are assigned:
 
 ## Verification
 
-The Cocotb regression currently contains three tests:
+The Cocotb regression currently contains four tests:
 
 1. Dual-lane dot-product and full 16-bit accumulator readback.
 2. All 256 signed INT4 activation/weight combinations, plus ReLU behavior.
 3. Positive saturation, overflow reporting, and asynchronous reset clearing.
+4. Negative saturation and rejection of commands without `command_valid`.
 
 Run the regression locally:
 

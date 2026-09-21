@@ -151,3 +151,28 @@ async def test_saturation_and_reset(dut):
     dut.rst_n.value = 1
     await RisingEdge(dut.clk)
     assert await read_acc(drv, 0, 0) == 0
+
+
+@cocotb.test()
+async def test_negative_saturation_and_command_gating(dut):
+    cocotb.start_soon(Clock(dut.clk, 20, unit="ns").start())
+    drv = Driver(dut)
+    await drv.reset()
+    await drv.command(CMD_CLEAR)
+    await load_bias(drv, 0, 0x80)
+
+    # Repeated negative products must clamp at -32768 and set overflow.
+    for _ in range(700):
+        await mac(drv, -8, 7, 0)
+    out = await finish(drv, CMD_LINEAR, 0)
+    assert signed4(out & 0xF) == -8
+    assert (out >> 5) & 1 == 1  # overflow
+
+    # A command-valid-low interval must not change the accumulator.
+    before = await read_acc(drv, 0, 0)
+    dut.ui_in.value = 0x77
+    dut.uio_in.value = CMD_CLEAR
+    await RisingEdge(dut.clk)
+    dut.uio_in.value = 0
+    after = await read_acc(drv, 0, 0)
+    assert after == before
